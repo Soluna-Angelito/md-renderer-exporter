@@ -28,6 +28,7 @@
   const copyHtmlBtn     = document.getElementById('copyHtmlBtn');
   const viewToggle      = document.getElementById('viewToggle');
   const hljsThemeLink   = document.getElementById('hljs-theme');
+  const editorHighlight = document.getElementById('editorHighlight');
 
   // ─── LaTeX Protection Tokens (null-byte delimited) ───
   const LATEX_TOKENS = {
@@ -78,6 +79,219 @@
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
+  }
+
+  // ─── Markdown Syntax Highlighting for Editor Overlay ───
+  function hlSpan(cls, content) {
+    return '<span class="' + cls + '">' + content + '</span>';
+  }
+
+  function highlightMarkdown(text) {
+    if (!text) return '\n';
+    const lines = text.split('\n');
+    const out = [];
+    let inFence = false;
+    let fenceChar = '';
+    let inMathBlock = false;
+
+    for (let li = 0; li < lines.length; li++) {
+      const raw = lines[li];
+      const trimmed = raw.trimStart();
+
+      if (!inMathBlock) {
+        const fm = trimmed.match(/^(`{3,}|~{3,})/);
+        if (fm) {
+          if (!inFence) {
+            inFence = true;
+            fenceChar = fm[1][0];
+            out.push(hlSpan('md-hl-code-fence', escapeHtml(raw)));
+            continue;
+          } else if (fm[1][0] === fenceChar) {
+            inFence = false;
+            fenceChar = '';
+            out.push(hlSpan('md-hl-code-fence', escapeHtml(raw)));
+            continue;
+          }
+        }
+      }
+      if (inFence) { out.push(hlSpan('md-hl-code-text', escapeHtml(raw))); continue; }
+
+      if (trimmed === '$$' || trimmed === '\\[' || trimmed === '\\]') {
+        if (trimmed === '$$') inMathBlock = !inMathBlock;
+        else if (trimmed === '\\[') inMathBlock = true;
+        else inMathBlock = false;
+        out.push(hlSpan('md-hl-math-delim', escapeHtml(raw)));
+        continue;
+      }
+      if (inMathBlock) { out.push(hlSpan('md-hl-math', escapeHtml(raw))); continue; }
+
+      const hm = raw.match(/^(#{1,6}\s)(.*)/);
+      if (hm) {
+        out.push(hlSpan('md-hl-heading-marker', escapeHtml(hm[1])) + hlSpan('md-hl-heading', hlInline(hm[2])));
+        continue;
+      }
+
+      if (/^\s*([-*_])\1{2,}\s*$/.test(raw)) {
+        out.push(hlSpan('md-hl-hr', escapeHtml(raw)));
+        continue;
+      }
+
+      const qm = raw.match(/^(\s*>+\s?)(.*)/);
+      if (qm) {
+        out.push(hlSpan('md-hl-quote-marker', escapeHtml(qm[1])) + hlInline(qm[2]));
+        continue;
+      }
+
+      const um = raw.match(/^(\s*)([-*+]\s)(.*)/);
+      if (um) {
+        out.push(escapeHtml(um[1]) + hlSpan('md-hl-list-marker', escapeHtml(um[2])) + hlInline(um[3]));
+        continue;
+      }
+
+      const om = raw.match(/^(\s*)(\d+\.\s)(.*)/);
+      if (om) {
+        out.push(escapeHtml(om[1]) + hlSpan('md-hl-list-marker', escapeHtml(om[2])) + hlInline(om[3]));
+        continue;
+      }
+
+      out.push(hlInline(raw));
+    }
+    return out.join('\n');
+  }
+
+  function hlInline(text) {
+    if (!text) return '';
+    let result = '';
+    let i = 0;
+    const n = text.length;
+
+    while (i < n) {
+      if (text[i] === '`') {
+        const end = text.indexOf('`', i + 1);
+        if (end !== -1) {
+          result += hlSpan('md-hl-code-punct', '`')
+                  + hlSpan('md-hl-code-inline', escapeHtml(text.substring(i + 1, end)))
+                  + hlSpan('md-hl-code-punct', '`');
+          i = end + 1; continue;
+        }
+      }
+
+      if (text[i] === '\\' && i + 1 < n) {
+        if (text[i + 1] === '(') {
+          const end = text.indexOf('\\)', i + 2);
+          if (end !== -1) {
+            result += hlSpan('md-hl-math-delim', escapeHtml('\\('))
+                    + hlSpan('md-hl-math', escapeHtml(text.substring(i + 2, end)))
+                    + hlSpan('md-hl-math-delim', escapeHtml('\\)'));
+            i = end + 2; continue;
+          }
+        }
+        if ('\\`*_{}[]()#+-.!$~>|'.includes(text[i + 1])) {
+          result += escapeHtml(text.substring(i, i + 2));
+          i += 2; continue;
+        }
+      }
+
+      if (text[i] === '$' && text[i + 1] === '$') {
+        const end = text.indexOf('$$', i + 2);
+        if (end !== -1) {
+          result += hlSpan('md-hl-math-delim', '$$')
+                  + hlSpan('md-hl-math', escapeHtml(text.substring(i + 2, end)))
+                  + hlSpan('md-hl-math-delim', '$$');
+          i = end + 2; continue;
+        }
+      }
+
+      if (text[i] === '$') {
+        const end = text.indexOf('$', i + 1);
+        if (end !== -1 && end > i + 1) {
+          result += hlSpan('md-hl-math-delim', '$')
+                  + hlSpan('md-hl-math', escapeHtml(text.substring(i + 1, end)))
+                  + hlSpan('md-hl-math-delim', '$');
+          i = end + 1; continue;
+        }
+      }
+
+      if (text[i] === '~' && text[i + 1] === '~') {
+        const end = text.indexOf('~~', i + 2);
+        if (end !== -1 && end > i + 2) {
+          result += hlSpan('md-hl-strike-punct', '~~')
+                  + hlSpan('md-hl-strike', escapeHtml(text.substring(i + 2, end)))
+                  + hlSpan('md-hl-strike-punct', '~~');
+          i = end + 2; continue;
+        }
+      }
+
+      if (text[i] === '*' && text[i + 1] === '*' && text[i + 2] === '*') {
+        const end = text.indexOf('***', i + 3);
+        if (end !== -1) {
+          result += hlSpan('md-hl-bold-punct', '***')
+                  + hlSpan('md-hl-bold-italic', escapeHtml(text.substring(i + 3, end)))
+                  + hlSpan('md-hl-bold-punct', '***');
+          i = end + 3; continue;
+        }
+      }
+
+      if (text[i] === '*' && text[i + 1] === '*') {
+        const end = text.indexOf('**', i + 2);
+        if (end !== -1 && end > i + 2) {
+          result += hlSpan('md-hl-bold-punct', '**')
+                  + hlSpan('md-hl-bold', escapeHtml(text.substring(i + 2, end)))
+                  + hlSpan('md-hl-bold-punct', '**');
+          i = end + 2; continue;
+        }
+      }
+
+      if (text[i] === '*') {
+        let end = -1;
+        for (let j = i + 1; j < n; j++) {
+          if (text[j] === '*' && text[j + 1] !== '*' && text[j - 1] !== '*') {
+            end = j; break;
+          }
+        }
+        if (end !== -1 && end > i + 1) {
+          result += hlSpan('md-hl-italic-punct', '*')
+                  + hlSpan('md-hl-italic', escapeHtml(text.substring(i + 1, end)))
+                  + hlSpan('md-hl-italic-punct', '*');
+          i = end + 1; continue;
+        }
+      }
+
+      if (text[i] === '!' && text[i + 1] === '[') {
+        const be = text.indexOf(']', i + 2);
+        if (be !== -1 && text[be + 1] === '(') {
+          const pe = text.indexOf(')', be + 2);
+          if (pe !== -1) {
+            result += hlSpan('md-hl-image', escapeHtml(text.substring(i, pe + 1)));
+            i = pe + 1; continue;
+          }
+        }
+      }
+
+      if (text[i] === '[') {
+        const be = text.indexOf(']', i + 1);
+        if (be !== -1 && text[be + 1] === '(') {
+          const pe = text.indexOf(')', be + 2);
+          if (pe !== -1) {
+            result += hlSpan('md-hl-link-punct', '[')
+                    + hlSpan('md-hl-link-text', escapeHtml(text.substring(i + 1, be)))
+                    + hlSpan('md-hl-link-punct', '](')
+                    + hlSpan('md-hl-link-url', escapeHtml(text.substring(be + 2, pe)))
+                    + hlSpan('md-hl-link-punct', ')');
+            i = pe + 1; continue;
+          }
+        }
+      }
+
+      result += escapeHtml(text[i]);
+      i++;
+    }
+    return result;
+  }
+
+  function syncHighlight() {
+    if (!editorHighlight) return;
+    editorHighlight.innerHTML = highlightMarkdown(editor.value) + '\n';
   }
 
   marked.setOptions({
@@ -419,6 +633,7 @@
   // ─── Update Preview ───
   let renderTimer = null;
   function updatePreview() {
+    syncHighlight();
     clearTimeout(renderTimer);
     renderTimer = setTimeout(() => {
       const t0 = performance.now();
@@ -606,16 +821,110 @@
   };
 
   // ─── Keyboard Shortcuts ───
+  const WRAP_PAIRS = { '*': '*', '`': '`', '(': ')', '[': ']', '$': '$', "'": "'", '"': '"' };
+  const BRACKET_PAIRS = { '(': ')', '[': ']' };
+  const QUOTE_PAIRS = { "'": "'", '"': '"' };
+  const OVERTYPE_CHARS = new Set([')', ']', "'", '"']);
+  const DELETE_PAIRS = { '(': ')', '[': ']', "'": "'", '"': '"', '`': '`' };
+
   editor.addEventListener('keydown', (e) => {
+    const start = editor.selectionStart;
+    const end = editor.selectionEnd;
+    const hasSelection = start !== end;
+    const text = editor.value;
+
     if (e.ctrlKey || e.metaKey) {
-      if (e.key === 'b') { e.preventDefault(); toolbarActions.bold(); }
-      else if (e.key === 'i') { e.preventDefault(); toolbarActions.italic(); }
+      if (e.key === 'b') { e.preventDefault(); toolbarActions.bold(); return; }
+      if (e.key === 'i') { e.preventDefault(); toolbarActions.italic(); return; }
+    }
+
+    if (hasSelection && WRAP_PAIRS.hasOwnProperty(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
+      const sel = text.substring(start, end);
+      document.execCommand('insertText', false, e.key + sel + WRAP_PAIRS[e.key]);
+      editor.selectionStart = start + 1;
+      editor.selectionEnd = end + 1;
+      updatePreview();
+      return;
     }
 
     if (e.key === 'Tab') {
       e.preventDefault();
-      document.execCommand('insertText', false, '  ');
+      if (hasSelection || e.shiftKey) {
+        const lineStart = text.lastIndexOf('\n', start - 1) + 1;
+        let searchEnd = end;
+        if (hasSelection && end > start && text[end - 1] === '\n') searchEnd = end - 1;
+        const lineEnd = text.indexOf('\n', Math.max(searchEnd, start));
+        const endPos = lineEnd === -1 ? text.length : lineEnd;
+        const block = text.substring(lineStart, endPos);
+        const lines = block.split('\n');
+
+        let newLines;
+        if (e.shiftKey) {
+          newLines = lines.map(line => {
+            if (line.startsWith('  ')) return line.substring(2);
+            if (line.startsWith('\t')) return line.substring(1);
+            if (line.startsWith(' ')) return line.substring(1);
+            return line;
+          });
+        } else {
+          newLines = lines.map(line => '  ' + line);
+        }
+
+        const newBlock = newLines.join('\n');
+        editor.selectionStart = lineStart;
+        editor.selectionEnd = endPos;
+        document.execCommand('insertText', false, newBlock);
+        editor.selectionStart = lineStart;
+        editor.selectionEnd = lineStart + newBlock.length;
+      } else {
+        document.execCommand('insertText', false, '  ');
+      }
       updatePreview();
+      return;
+    }
+
+    if (!hasSelection) {
+      const nextChar = text[start] || '';
+      const prevChar = start > 0 ? text[start - 1] : '';
+
+      if (OVERTYPE_CHARS.has(e.key) && nextChar === e.key) {
+        e.preventDefault();
+        editor.selectionStart = editor.selectionEnd = start + 1;
+        return;
+      }
+
+      if (BRACKET_PAIRS[e.key]) {
+        e.preventDefault();
+        document.execCommand('insertText', false, e.key + BRACKET_PAIRS[e.key]);
+        editor.selectionStart = editor.selectionEnd = start + 1;
+        updatePreview();
+        return;
+      }
+
+      if (QUOTE_PAIRS[e.key]) {
+        const afterAlnum = prevChar && /[a-zA-Z0-9]/.test(prevChar);
+        const nextSpecial = nextChar === '' || /[\s;:,.!?\)\]\}]/.test(nextChar);
+        if (!afterAlnum && nextSpecial) {
+          e.preventDefault();
+          document.execCommand('insertText', false, e.key + QUOTE_PAIRS[e.key]);
+          editor.selectionStart = editor.selectionEnd = start + 1;
+          updatePreview();
+          return;
+        }
+      }
+
+      if (e.key === 'Backspace') {
+        const pc = start > 0 ? text[start - 1] : '';
+        if (DELETE_PAIRS[pc] === nextChar) {
+          e.preventDefault();
+          editor.selectionStart = start - 1;
+          editor.selectionEnd = start + 1;
+          document.execCommand('insertText', false, '');
+          updatePreview();
+          return;
+        }
+      }
     }
   });
 
@@ -1048,6 +1357,12 @@ def gradient_descent(f, grad_f, x0, lr=0.01, epochs=1000):
     editor.addEventListener('input', updatePreview);
     editor.addEventListener('keyup', updateCursorPos);
     editor.addEventListener('click', updateCursorPos);
+    editor.addEventListener('scroll', () => {
+      if (editorHighlight) {
+        editorHighlight.scrollTop = editor.scrollTop;
+        editorHighlight.scrollLeft = editor.scrollLeft;
+      }
+    });
 
     themeToggle.addEventListener('click', toggleTheme);
     if (openFileBtn) openFileBtn.addEventListener('click', openMarkdownFile);
