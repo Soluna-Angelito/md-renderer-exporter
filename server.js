@@ -1,4 +1,4 @@
-// server.js — MD Renderer: Express + Puppeteer PDF export server
+// server.js — MD Renderer: Express + Puppeteer-core PDF export server
 'use strict';
 
 const express = require('express');
@@ -10,6 +10,33 @@ const app  = express();
 const PORT = process.env.PORT || 8766;
 
 app.use(express.json({ limit: '50mb' }));
+
+// ─── Offline mode (auto-detected from vendor/manifest.json) ───
+const vendorManifest = (function loadVendorManifest() {
+  const p = path.join(__dirname, 'vendor', 'manifest.json');
+  if (!fs.existsSync(p)) return null;
+  try { return JSON.parse(fs.readFileSync(p, 'utf8')); }
+  catch { return null; }
+})();
+
+if (vendorManifest) {
+  console.log('[offline] Vendor assets detected — serving local CDN resources.');
+
+  app.get(['/', '/index.html'], (_req, res) => {
+    let html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+    for (const [cdnUrl, localPath] of Object.entries(vendorManifest.urlMap)) {
+      html = html.split(cdnUrl).join(localPath);
+    }
+    html = html.replace(/<link rel="preconnect"[^>]*>\n?/g, '');
+    res.type('html').send(html);
+  });
+
+  app.use('/vendor', express.static(path.join(__dirname, 'vendor'), {
+    maxAge: '7d',
+    immutable: true
+  }));
+}
+
 app.use(express.static(__dirname));
 
 function execFileAsync(command, args, options = {}) {
@@ -87,13 +114,62 @@ async function showWindowsSaveMarkdownDialog(defaultName) {
   return selectedPath || null;
 }
 
-// ─── Lazy Puppeteer import (only loaded when first PDF is requested) ───
+// ─── Chrome / Chromium executable discovery ───
+function findChrome() {
+  if (process.env.CHROME_PATH) {
+    if (fs.existsSync(process.env.CHROME_PATH)) return process.env.CHROME_PATH;
+    console.warn(`[warn] CHROME_PATH="${process.env.CHROME_PATH}" not found — trying other locations.`);
+  }
+
+  if (vendorManifest && vendorManifest.chromiumPath) {
+    const abs = path.resolve(__dirname, vendorManifest.chromiumPath);
+    if (fs.existsSync(abs)) return abs;
+  }
+
+  const candidates = [];
+
+  if (process.platform === 'win32') {
+    const prefixes = [
+      process.env['PROGRAMFILES'],
+      process.env['PROGRAMFILES(X86)'],
+      process.env['LOCALAPPDATA'],
+    ].filter(Boolean);
+    for (const p of prefixes) {
+      candidates.push(path.join(p, 'Google', 'Chrome', 'Application', 'chrome.exe'));
+    }
+    for (const p of prefixes) {
+      candidates.push(path.join(p, 'Microsoft', 'Edge', 'Application', 'msedge.exe'));
+    }
+  } else if (process.platform === 'darwin') {
+    candidates.push(
+      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+      '/Applications/Chromium.app/Contents/MacOS/Chromium',
+      '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+    );
+  } else {
+    candidates.push(
+      '/usr/bin/google-chrome-stable',
+      '/usr/bin/google-chrome',
+      '/usr/bin/chromium-browser',
+      '/usr/bin/chromium',
+      '/snap/bin/chromium',
+    );
+  }
+
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+
+  return null;
+}
+
+// ─── Lazy Puppeteer-core import (only loaded when first PDF is requested) ───
 let puppeteer = null;
 let browser   = null;
 
 async function getPuppeteer() {
   if (!puppeteer) {
-    puppeteer = require('puppeteer');
+    puppeteer = require('puppeteer-core');
   }
   return puppeteer;
 }
@@ -101,8 +177,15 @@ async function getPuppeteer() {
 async function getBrowser() {
   const pup = await getPuppeteer();
   if (!browser || !browser.isConnected()) {
+    const executablePath = findChrome();
+    if (!executablePath) {
+      throw new Error(
+        'Chrome/Chromium not found. Set CHROME_PATH, install Chrome, or run "npm run prepare-offline" to download Chromium.'
+      );
+    }
     browser = await pup.launch({
       headless: 'new',
+      executablePath,
       args: ['--no-sandbox', '--disable-setuid-sandbox']
     });
   }
@@ -124,39 +207,40 @@ function readAppCss() {
   return fs.readFileSync(path.join(__dirname, 'css', 'style.css'), 'utf8');
 }
 
+// ─── CDN URL resolution (passthrough online, localhost in offline mode) ───
+const GOOGLE_FONTS_URL = 'https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Merriweather:ital,wght@0,400;0,700;1,400&display=swap';
+
+function resolveCdnUrl(cdnUrl) {
+  if (!vendorManifest || !vendorManifest.urlMap[cdnUrl]) return cdnUrl;
+  return `http://localhost:${PORT}${vendorManifest.urlMap[cdnUrl]}`;
+}
+
 // ─── Build the standalone HTML that Puppeteer will render ───
 function buildHtml(renderedHtml, theme) {
   const appCss    = readAppCss();
   const hljsTheme = theme === 'dark' ? 'github-dark' : 'github';
+
+  const katexCss = resolveCdnUrl('https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css');
+  const hljsCss  = resolveCdnUrl(`https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/${hljsTheme}.min.css`);
+  const fontsUrl = resolveCdnUrl(GOOGLE_FONTS_URL);
+
+  const preconnect = vendorManifest
+    ? ''
+    : `<link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>`;
 
   return `<!DOCTYPE html>
 <html lang="en" data-theme="${theme}">
 <head>
   <meta charset="UTF-8">
 
-  <!-- KaTeX CSS (for pre-rendered KaTeX spans) -->
-  <link rel="stylesheet"
-        href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <link rel="stylesheet" href="${katexCss}">
+  <link rel="stylesheet" href="${hljsCss}">
+  ${preconnect}
+  <link href="${fontsUrl}" rel="stylesheet">
 
-  <!-- highlight.js theme (for pre-highlighted code blocks) -->
-  <link rel="stylesheet"
-        href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/${hljsTheme}.min.css">
-
-  <!-- Google Fonts -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Merriweather:ital,wght@0,400;0,700;1,400&display=swap"
-        rel="stylesheet">
-
-  <!-- App CSS (full) -->
   <style>${appCss}</style>
 
-  <!-- Layout overrides for the PDF page
-       Mirrors the @media print rules from style.css:
-       - Puppeteer margin: 0 (no white page-level borders)
-       - CSS padding: 12mm on .preview-content for spacing
-       - box-decoration-break: clone  so padding + background repeat
-         on EVERY page fragment (per-page top/bottom spacing) -->
   <style>
     html, body {
       height: auto !important;
@@ -368,5 +452,13 @@ app.get('/api/health', (_req, res) => res.json({ ok: true }));
 // ─── Start ───
 app.listen(PORT, () => {
   console.log(`MD Renderer server running at http://localhost:${PORT}`);
+  if (vendorManifest) console.log('[offline] Offline mode active — using local vendor assets.');
+  const chromePath = findChrome();
+  if (chromePath) {
+    console.log(`[pdf] Chrome: ${chromePath}`);
+  } else {
+    console.warn('[pdf] Chrome/Chromium not found — PDF export will not work until resolved.');
+    console.warn('      Set CHROME_PATH, install Chrome, or run "npm run prepare-offline".');
+  }
   console.log('Press Ctrl+C to stop.');
 });

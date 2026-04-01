@@ -3,12 +3,12 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![Express](https://img.shields.io/badge/Express-4.x-000000?logo=express&logoColor=white)](https://expressjs.com/)
-[![Puppeteer](https://img.shields.io/badge/Puppeteer-24.x-40B5A4?logo=puppeteer&logoColor=white)](https://pptr.dev/)
+[![Puppeteer-core](https://img.shields.io/badge/Puppeteer--core-24.x-40B5A4?logo=puppeteer&logoColor=white)](https://pptr.dev/)
 [![Marked](https://img.shields.io/badge/Marked-12.x-black)](https://marked.js.org/)
 [![KaTeX](https://img.shields.io/badge/KaTeX-0.16.x-6B54A3)](https://katex.org/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Cross--platform-0078D4?logo=windows&logoColor=white)](#prerequisites)
 
-A local-first Markdown + LaTeX editor with live preview, syntax highlighting, and server-side PDF export — powered by Node.js, Puppeteer, and vanilla JavaScript.
+A local-first Markdown + LaTeX editor with live preview, syntax highlighting, and server-side PDF export — powered by Node.js, Puppeteer-core, and vanilla JavaScript.
 
 ## Features
 
@@ -36,7 +36,7 @@ A local-first Markdown + LaTeX editor with live preview, syntax highlighting, an
 |-------|------------|
 | Runtime | Node.js |
 | Server | Express 4.x |
-| PDF Engine | Puppeteer 24.x (headless Chromium) |
+| PDF Engine | Puppeteer-core 24.x (uses system Chrome/Chromium) |
 | Markdown | Marked.js 12.x (CDN) |
 | Math | KaTeX 0.16.x (CDN) |
 | Syntax | highlight.js 11.x (CDN) |
@@ -46,6 +46,7 @@ A local-first Markdown + LaTeX editor with live preview, syntax highlighting, an
 ## Prerequisites
 
 - **Node.js** 18 or later
+- **Chrome**, **Chromium**, or **Edge** — puppeteer-core does not bundle a browser; it auto-detects your system Chrome installation (or set the `CHROME_PATH` environment variable to override)
 - **Windows** for native file dialogs (Open / Save As); all other features work cross-platform
 
 ## Getting Started
@@ -107,19 +108,47 @@ The `/api/export-pdf` endpoint accepts the following body parameters:
 | `mode` | `multi` \| `single` | `multi` | Multi-page (paginated A4/Letter) or single continuous page |
 | `format` | `a4` \| `letter` | `a4` | Page format for multi-page mode; sets width for single-page mode |
 
+## Offline / Airgapped Mode
+
+The default (online) mode loads KaTeX, Marked, highlight.js, and Google Fonts from CDNs. For environments without internet access, you can prepare a fully self-contained offline build:
+
+```bash
+# On a machine with internet — download all CDN assets + Chromium
+npm run prepare-offline
+
+# Or skip the ~200 MB Chromium download if Chrome is already installed
+npm run prepare-offline -- --skip-chromium
+```
+
+This creates a `vendor/` directory containing all external resources. The server auto-detects `vendor/manifest.json` at startup and switches to offline mode automatically.
+
+**Deploying to an airgapped machine:**
+
+1. On the internet-connected machine: `npm install && npm run prepare-offline`
+2. Copy the entire project directory (including `node_modules/` and `vendor/`) to the target machine
+3. On the target: `npm start` or double-click `start.bat`
+
+To revert to online mode, simply delete the `vendor/` directory.
+
+On Windows, you can also double-click **`scripts/prepare-offline.bat`** which handles dependency installation and runs the preparation script.
+
 ## Project Structure
 
 ```
 md-renderer/
-├── server.js          # Express server — API routes, Puppeteer PDF pipeline, native dialogs
+├── server.js          # Express server — API routes, Puppeteer-core PDF pipeline, native dialogs
 ├── index.html         # Single-page app shell — toolbar, editor, preview, status bar
 ├── js/
 │   └── app.js         # Client-side logic — Markdown/LaTeX pipeline, UI, API calls
 ├── css/
 │   └── style.css      # Theming (dark/light), layout, Markdown body styles, print styles
+├── scripts/
+│   ├── prepare-offline.js   # Downloads CDN assets, fonts, and Chromium for offline use
+│   └── prepare-offline.bat  # Windows wrapper for the preparation script
 ├── package.json       # npm metadata and dependencies
 ├── start.bat          # Windows launcher — checks Node, installs deps, starts server
-└── stop.bat           # Windows helper — kills process on port 8766
+├── stop.bat           # Windows helper — kills process on port 8766
+└── vendor/            # (generated) Offline CDN assets — auto-detected by server
 ```
 
 ## Configuration
@@ -127,6 +156,7 @@ md-renderer/
 | Variable | Location | Default | Description |
 |----------|----------|---------|-------------|
 | `PORT` | `server.js` / `process.env.PORT` | `8766` | HTTP server port |
+| `CHROME_PATH` | Environment variable | (auto-detect) | Path to Chrome/Chromium executable for PDF export |
 | Body limit | `server.js` | `50mb` | Max JSON payload size for large documents |
 
 ## Keyboard Shortcuts

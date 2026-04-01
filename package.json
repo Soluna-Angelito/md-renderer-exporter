@@ -5,10 +5,11 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "prepare-offline": "node scripts/prepare-offline.js"
   },
   "dependencies": {
     "express": "^4.21.0",
-    "puppeteer": "^24.0.0"
+    "puppeteer-core": "^24.0.0"
   }
 }

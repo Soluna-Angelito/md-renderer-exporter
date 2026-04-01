@@ -714,7 +714,8 @@
   function setTheme(theme) {
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem(THEME_KEY, theme);
-    const hljsBase = 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/';
+    const currentHref = hljsThemeLink.getAttribute('href');
+    const hljsBase = currentHref.substring(0, currentHref.lastIndexOf('/') + 1);
     hljsThemeLink.href = theme === 'dark'
       ? hljsBase + 'github-dark.min.css'
       : hljsBase + 'github.min.css';
