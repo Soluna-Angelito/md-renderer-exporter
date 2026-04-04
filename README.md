@@ -53,7 +53,7 @@ A local-first Markdown + LaTeX editor with live preview, syntax highlighting, an
 
 ### Quick Start (Windows)
 
-Double-click **`start.bat`** — it checks for Node.js, runs `npm install` on first launch, starts the server, and opens the app at [`http://localhost:8766`](http://localhost:8766).
+Double-click **`start.bat`** — it checks for Node.js, runs `npm install` on first launch, and starts the server. Then open [`http://localhost:8766`](http://localhost:8766) in your browser.
 
 ### Manual Setup
 

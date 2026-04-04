@@ -37,7 +37,15 @@ if (vendorManifest) {
   }));
 }
 
-app.use(express.static(__dirname));
+// ─── Public static assets (scoped to only the directories the frontend needs) ───
+app.use('/css', express.static(path.join(__dirname, 'css')));
+app.use('/js',  express.static(path.join(__dirname, 'js')));
+
+if (!vendorManifest) {
+  app.get(['/', '/index.html'], (_req, res) => {
+    res.sendFile(path.join(__dirname, 'index.html'));
+  });
+}
 
 function execFileAsync(command, args, options = {}) {
   return new Promise((resolve, reject) => {
@@ -184,7 +192,7 @@ async function getBrowser() {
       );
     }
     browser = await pup.launch({
-      headless: 'new',
+      headless: true,
       executablePath,
       args: ['--no-sandbox', '--disable-setuid-sandbox']
     });
@@ -408,17 +416,27 @@ app.post('/api/export-pdf', async (req, res) => {
     const zeroMargin = { top: '0', bottom: '0', left: '0', right: '0' };
 
     if (mode === 'single') {
-      // Measure actual content height (the PDFCrowd "page_height: -1" technique).
+      const pageWidth  = format === 'letter' ? '215.9mm' : '210mm';
+      const widthMm    = format === 'letter' ? 215.9 : 210;
+      const widthPx    = Math.ceil(widthMm * 96 / 25.4);   // CSS px at 96 dpi
+
+      // Match viewport to the PDF page width so text reflows identically to
+      // the layout Puppeteer will use when generating the PDF.
+      await page.setViewport({ width: widthPx, height: 100 });
+      await page.evaluate(() => new Promise(r =>
+        requestAnimationFrame(() => requestAnimationFrame(r))
+      ));
+
       const contentHeight = await page.evaluate(() => {
         const el = document.querySelector('.preview-content');
-        return el ? el.scrollHeight : document.body.scrollHeight;
+        return el
+          ? Math.ceil(el.getBoundingClientRect().height)
+          : document.body.scrollHeight;
       });
-
-      const pageWidth = format === 'letter' ? '215.9mm' : '210mm';
 
       pdfOptions = {
         width:  pageWidth,
-        height: `${contentHeight}px`,
+        height: `${contentHeight + 2}px`,
         printBackground: true,
         margin: zeroMargin
       };
