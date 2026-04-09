@@ -488,8 +488,7 @@ html, body {
   margin: 0;
   padding: 20px 24px;
   border: none;
-  overflow-x: hidden;
-  overflow-y: auto;
+  overflow: hidden;
   font-family: var(--font-mono);
   font-size: 14px;
   line-height: 1.7;

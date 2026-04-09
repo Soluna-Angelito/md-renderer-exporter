@@ -1380,12 +1380,23 @@ def gradient_descent(f, grad_f, x0, lr=0.01, epochs=1000):
     editor.addEventListener('input', updatePreview);
     editor.addEventListener('keyup', updateCursorPos);
     editor.addEventListener('click', updateCursorPos);
+    let _scrollLock = false;
     editor.addEventListener('scroll', () => {
-      if (editorHighlight) {
-        editorHighlight.scrollTop = editor.scrollTop;
-        editorHighlight.scrollLeft = editor.scrollLeft;
-      }
+      if (_scrollLock || !editorHighlight) return;
+      _scrollLock = true;
+      editorHighlight.scrollTop = editor.scrollTop;
+      editorHighlight.scrollLeft = editor.scrollLeft;
+      requestAnimationFrame(() => { _scrollLock = false; });
     });
+    if (editorHighlight) {
+      editorHighlight.addEventListener('scroll', () => {
+        if (_scrollLock) return;
+        _scrollLock = true;
+        editor.scrollTop = editorHighlight.scrollTop;
+        editor.scrollLeft = editorHighlight.scrollLeft;
+        requestAnimationFrame(() => { _scrollLock = false; });
+      });
+    }
 
     themeToggle.addEventListener('click', toggleTheme);
     if (openFileBtn) openFileBtn.addEventListener('click', openMarkdownFile);
